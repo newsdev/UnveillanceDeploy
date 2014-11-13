@@ -34,7 +34,8 @@ def build_image(config):
 		('SUPER_PACKAGE', "CompassAnnex"),
 		('ANNEX_USER', "unveillance"),
 		('ANNEX_USER_PWD', "unveillance"),
-		('ssh_root', "/home/unveillance/.ssh")
+		('ssh_root', "/home/unveillance/.ssh"),
+		('EXTRA_PORTS', "")
 	]
 	
 	sec_vars = [
@@ -77,6 +78,10 @@ def build_image(config):
 		print "You don't have package %s installed.\nAdd it by running git submodule add [URL]"
 		return not clean_up()
 
+	config['docker']['EXTRA_PORTS'] = " ".join([config['docker']['EXTRA_PORTS'], str(config['nginx']['proxy_main_port'])])
+	config['secrets']['ssh_root'] = config['docker']['ssh_root']
+	print "*** EXTRA_PORTS: %s" % config['docker']['EXTRA_PORTS']
+
 	replacements = [
 		("Dockerfile.init.example", docker_vars, 'docker'),
 		("install.sh.example", docker_vars, 'docker'),
@@ -87,8 +92,6 @@ def build_image(config):
 	for f in replacements:
 		with open(f[0].replace(".example","").replace(".init",""), 'wb') as t:
 			t.write(''.join(builld_config(f, config)))
-
-	config['secrets']['ssh_root'] = config['docker']['ssh_root']
 
 	if not os.path.exists("lib"):
 		with settings(warn_only=True):
