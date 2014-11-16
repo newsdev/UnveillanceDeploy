@@ -22,10 +22,6 @@ You can create a config.json file with the following format:
 			"uv_uuid": "my_annex",						# the Annex's short-code or nickname
 			"annex_dir": "/home/unveillance/annex"		# where the Annex should store its files
 		},
-		"nginx": {
-			"client_max_body_size": 10, 				# in MB, should you require uploads into the Annex from a Frontend client
-			"proxy_main_port": 8889						# the port the Annex will serve its API out of
-		}, 
 		"docker": {
 			"SUPER_PACKAGE": "CompassAnnex", 			# the name of the package you wish to deploy
 			"ANNEX_USER": "unveillance", 				# unix user
@@ -39,4 +35,4 @@ If any of these directives are missing, you will be prompted during the build pr
 
 ## Deploy
 
-Your Docker image is now available and can be deployed at any time via Docker using `sudo docker run -i -t compassannex:unveillance` (or whatever the image turns out to be named, given your inputs).
+Your Docker image is now available and can be deployed at any time via Docker using `sudo docker run -iPt compassannex:unveillance` (or whatever the image turns out to be named, given your inputs).

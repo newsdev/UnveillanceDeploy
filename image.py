@@ -35,7 +35,8 @@ def build_image(config):
 		('ANNEX_USER', "unveillance"),
 		('ANNEX_USER_PWD', "unveillance"),
 		('ssh_root', "/home/unveillance/.ssh"),
-		('EXTRA_PORTS', "")
+		('EXTRA_PORTS', ""),
+		('MAIN_PORT', 8889)
 	]
 	
 	sec_vars = [
@@ -44,15 +45,7 @@ def build_image(config):
 		('uv_uuid', "unveillance_annex")
 	]
 
-	# 'proxy_set_header Cookie "$http_cookie;$uv_public";'
-	nginx_vars = [
-		('client_max_body_size', 20),
-		('mode', 1),
-		('proxy_extras', ""),
-		('proxy_main_port', 8889)
-	]
-
-	for d in [('docker', docker_vars), ('secrets', sec_vars), ('nginx', nginx_vars)]:
+	for d in [('docker', docker_vars), ('secrets', sec_vars)]:
 		if d[0] not in config.keys():
 			config[d[0]] = {}
 
@@ -76,41 +69,35 @@ def build_image(config):
 	# check to see if user has submodule first
 	if not os.path.exists(config['docker']['SUPER_PACKAGE']):
 		print "You don't have package %s installed.\nAdd it by running git submodule add [URL]"
-		return not clean_up()
+		return False
 
-	config['docker']['EXTRA_PORTS'] = " ".join([config['docker']['EXTRA_PORTS'], str(config['nginx']['proxy_main_port'])])
-	config['secrets']['ssh_root'] = config['docker']['ssh_root']
-	print "*** EXTRA_PORTS: %s" % config['docker']['EXTRA_PORTS']
+	default_ports = " ".join([str(p) for p in [config['docker']['MAIN_PORT'], config['docker']['MAIN_PORT'] + 1]])
+	config['docker']['EXTRA_PORTS'] = " ".join([default_ports, config['docker']['EXTRA_PORTS']])
 
 	replacements = [
 		("Dockerfile.init.example", docker_vars, 'docker'),
 		("install.sh.example", docker_vars, 'docker'),
-		("run.sh.example", docker_vars, 'docker'),
-		("nginx.conf.example", nginx_vars, 'nginx')
+		("run.sh.example", docker_vars, 'docker')
 	]
-	
-	for f in replacements:
-		with open(f[0].replace(".example","").replace(".init",""), 'wb') as t:
-			t.write(''.join(builld_config(f, config)))
 
 	if not os.path.exists("lib"):
 		with settings(warn_only=True):
 			local("mkdir lib")
+			local("mkdir lib/make")
+	
+	for f in replacements:
+		with open(os.path.join("lib", f[0].replace(".example","")), 'wb') as t:
+			t.write(''.join(builld_config(f, config)))
 
-	with open("lib/unveillance.secrets.json", 'wb') as t:
+	config['secrets']['ssh_root'] = config['docker']['ssh_root']
+
+	with open("lib/make/unveillance.secrets.json", 'wb') as t:
 		t.write(dumps(config['secrets']))
 
 	with settings(warn_only=True):
-		local("mv nginx.conf lib")
-		local("mv install.sh lib")
-		local("mv run.sh lib")
-		local("chmod +x lib/*.sh")
-
-	print "****************************** [ IMPORTANT!!!! ] ******************************"
-	print "The next few commands require sudo."
-	print "If you can do sudo without a password, press ENTER."
-	print "Or else, type it in here"
-	sudo_pwd = prompt("[DEFAULT None]: ")
+		local("mv lib/install.sh lib/make")
+		local("mv lib/run.sh lib/make")
+		local("chmod +x lib/make/*.sh")
 
 	c_map = {
 		'a' : config['docker']['ANNEX_USER'],
@@ -118,48 +105,40 @@ def build_image(config):
 		'h' : os.path.join("home", config['docker']['ANNEX_USER']),
 		's' : "sudo" if len(sudo_pwd) == 0 else "echo \"%s\" | sudo -S" % sudo_pwd,
 		'd' : ("unveillance/%s-%s" % (
+			config['docker']['SUPER_PACKAGE'], config['docker']['ANNEX_USER'])).lower(),
+		'f' : ("%s:%s" % (
 			config['docker']['SUPER_PACKAGE'], config['docker']['ANNEX_USER'])).lower()
 	}
 
-	with settings(warn_only=True):
-		image_id = None
-		local("mv %(p)s lib" % (c_map))
+	cmds = [
+		"cd lib",
+		"mv ../%(p)s make" % (c_map),
+		"mv Dockerfile.init Dockerfile",
+		"sudo docker build -t %(d)s ." % (c_map),
+		"mv make/%(p)s ../" % (c_map),
+		"sudo docker run --name unveillance_stub -it %(d)s" % (c_map),
+		"mv Dockerfile.commit Dockerfile",
+		"sudo docker start unveillance_stub",
+		"sudo docker commit unveillance_stub %(f)s" % (c_map),
+		"sudo docker stop unveillance_stub",
+		"sudo docker build -t %(f)s ." % (c_map),
+		"sudo docker rm unveillance_stub",
+		"sudo docker rmi %(d)s" % (c_map),
+		"cd ../",
+		"echo \"Finished building!  Now try:\"",
+		"echo \"sudo docker run -iPt %(f)s\"" % (c_map)
+	]
 
-		# BUILD CONTAINER
-		build_cmd = "%(s)s docker build -t %(d)s ." % (c_map)
+	with open("lib/commit_image.txt", 'wb') as c:
+		c.write("\n".join(cmds))
 
-		for status in local(build_cmd, capture=True).splitlines():
-			print "XX: %s" % status
-			try:
-				image_id = re.findall(r'Successfully built ([\w]{12})', status)[0]
-				break
-			except Exception as e:
-				pass
-		
-		del c_map['s']
-		local("mv lib/%(p)s ." % (c_map))
+	config['docker']['BUILT_PACKAGE'] = c_map['f']
+	docker_vars.append(('BUILT_PACKAGE', c_map['f']))
 
-		if image_id is None:
-			print "SORRY NO IMAGE"
-			return not clean_up()
-	
-	# write commands to a file
-	run_cmd = "sudo docker run --name unveillance_stub -i -t %(d)s" % (c_map)
-	print run_cmd
-
-	commit_as = ("%(p)s:%(a)s" % (c_map)).lower()		
-	print commit_as
-
-	with open("commit_image.txt", 'wb') as c:
-		c.write("\n".join([run_cmd, commit_as]))
-
-	config['docker']['BUILT_PACKAGE'] = commit_as
-	docker_vars.append(('BUILT_PACKAGE', commit_as))
-
-	with open("Dockerfile", 'wb') as c:
+	with open("lib/Dockerfile.commit", 'wb') as c:
 		c.write("".join(builld_config(("Dockerfile.commit.example", docker_vars, 'docker'), config)))
 
-	return clean_up()
+	return True
 
 if __name__ == "__main__":
 	config = None
